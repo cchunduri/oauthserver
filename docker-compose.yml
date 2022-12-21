@@ -1,0 +1,35 @@
+version: '3.1'
+services:
+  PostgreSQL:
+    hostname: postgres
+    image: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_PASSWORD=psql
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=oauth-server
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chai-oauth-server
+  app:
+    container_name: chai-oauth-server
+    image: chai-oauth-server
+    networks:
+      - chai-oauth-server
+    build: ./
+    ports:
+      - "8080:8090"
+    depends_on:
+      - PostgreSQL
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/oauth-server
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=psql
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=validate
+networks:
+  chai-oauth-server:
