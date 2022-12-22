@@ -10,9 +10,12 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.core.annotation.Order
 import org.springframework.security.config.Customizer
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
 import org.springframework.security.core.userdetails.User
 import org.springframework.security.core.userdetails.UserDetails
 import org.springframework.security.core.userdetails.UserDetailsService
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
+import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.oauth2.core.AuthorizationGrantType
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod
 import org.springframework.security.oauth2.core.oidc.OidcScopes
@@ -26,55 +29,62 @@ import org.springframework.security.oauth2.server.authorization.settings.Authori
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings
 import org.springframework.security.provisioning.InMemoryUserDetailsManager
 import org.springframework.security.web.SecurityFilterChain
-import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
+import org.springframework.web.filter.CorsFilter
+import org.zalando.problem.spring.web.advice.security.SecurityProblemSupport
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
 import java.util.*
 
-
 @Configuration
-class OAuthServiceConfig {
-
+@EnableWebSecurity
+class OAuthServiceConfig(
+    private var problemSupport: SecurityProblemSupport? = null
+) {
 
     @Bean
     @Order(1)
     @Throws(Exception::class)
-    fun authorizationServerSecurityFilterChain(http: HttpSecurity): SecurityFilterChain? {
+    fun authorizationServerSecurityFilterChain(http: HttpSecurity): SecurityFilterChain {
         OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http)
         http.getConfigurer(OAuth2AuthorizationServerConfigurer::class.java)
             .oidc(Customizer.withDefaults())
-        http.exceptionHandling { exceptions ->
-                exceptions.authenticationEntryPoint(
-                        LoginUrlAuthenticationEntryPoint("/login")
-                )
-            }.oauth2ResourceServer { obj -> obj.jwt() }
+        http.oauth2ResourceServer { obj -> obj.jwt() }
         return http.build()
     }
 
     @Bean
     @Order(2)
     @Throws(Exception::class)
-    fun defaultSecurityFilterChain(http: HttpSecurity): SecurityFilterChain? {
-        http.authorizeHttpRequests { authorize ->
-            authorize.anyRequest().authenticated()
-        }.formLogin(Customizer.withDefaults())
+    fun defaultSecurityFilterChain(http: HttpSecurity): SecurityFilterChain {
+        http
+            .exceptionHandling()
+                .authenticationEntryPoint(problemSupport)
+                .accessDeniedHandler(problemSupport)
+            .and()
+                .csrf().disable()
+                .authorizeHttpRequests()
+                    .requestMatchers("/users/register").permitAll()
+                    .requestMatchers("/").authenticated()
+            .and()
+                .httpBasic()
         return http.build()
     }
 
     @Bean
-    fun userDetailsService(): UserDetailsService? {
+    fun userDetailsService(passwordEncoder: PasswordEncoder): UserDetailsService {
         val userDetails: UserDetails = User.builder()
             .username("user")
-            .password("password")
+            .password(passwordEncoder.encode("password"))
             .roles("USER")
             .build()
         return InMemoryUserDetailsManager(userDetails)
     }
 
     @Bean
-    fun registeredClientRepository(): RegisteredClientRepository? {
+    fun registeredClientRepository(): RegisteredClientRepository {
         val registeredClient: RegisteredClient = RegisteredClient.withId(UUID.randomUUID().toString())
             .clientId("chai-apps-client")
             .clientSecret("{noop}secret")
@@ -94,7 +104,7 @@ class OAuthServiceConfig {
     }
 
     @Bean
-    fun jwkSource(): JWKSource<SecurityContext?>? {
+    fun jwkSource(): JWKSource<SecurityContext> {
 
         val keyPair: KeyPair =  generateRsaKey()
 
@@ -107,7 +117,7 @@ class OAuthServiceConfig {
             .build()
 
         val jwkSet = JWKSet(rsaKey)
-        return JWKSource { jwkSelector: JWKSelector, _: SecurityContext? ->
+        return JWKSource { jwkSelector: JWKSelector, _: SecurityContext ->
             jwkSelector.select(
                 jwkSet
             )
@@ -125,12 +135,17 @@ class OAuthServiceConfig {
     }
 
     @Bean
-    fun jwtDecoder(jwkSource: JWKSource<SecurityContext?>?): JwtDecoder? {
+    fun jwtDecoder(jwkSource: JWKSource<SecurityContext?>?): JwtDecoder {
         return OAuth2AuthorizationServerConfiguration.jwtDecoder(jwkSource)
     }
 
     @Bean
-    fun authorizationServerSettings(): AuthorizationServerSettings? {
+    fun authorizationServerSettings(): AuthorizationServerSettings {
         return AuthorizationServerSettings.builder().build()
+    }
+
+    @Bean
+    fun passwordEncoder(): PasswordEncoder {
+        return BCryptPasswordEncoder()
     }
 }
