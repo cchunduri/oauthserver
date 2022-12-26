@@ -1,16 +1,20 @@
 package com.chaiapps.oauthserver.configuration
 
+import com.chaiapps.oauthserver.security.JWTConfigurer
+import com.chaiapps.oauthserver.security.TokenProvider
 import com.nimbusds.jose.jwk.JWKSelector
 import com.nimbusds.jose.jwk.JWKSet
 import com.nimbusds.jose.jwk.RSAKey
 import com.nimbusds.jose.jwk.source.JWKSource
 import com.nimbusds.jose.proc.SecurityContext
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.annotation.Order
 import org.springframework.security.config.Customizer
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity
+import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.core.userdetails.User
 import org.springframework.security.core.userdetails.UserDetails
 import org.springframework.security.core.userdetails.UserDetailsService
@@ -29,8 +33,6 @@ import org.springframework.security.oauth2.server.authorization.settings.Authori
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings
 import org.springframework.security.provisioning.InMemoryUserDetailsManager
 import org.springframework.security.web.SecurityFilterChain
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
-import org.springframework.web.filter.CorsFilter
 import org.zalando.problem.spring.web.advice.security.SecurityProblemSupport
 import java.security.KeyPair
 import java.security.KeyPairGenerator
@@ -38,11 +40,16 @@ import java.security.interfaces.RSAPrivateKey
 import java.security.interfaces.RSAPublicKey
 import java.util.*
 
+
 @Configuration
 @EnableWebSecurity
-class OAuthServiceConfig(
+class OAuthServiceConfig {
+
+    @Autowired
+    private val tokenProvider: TokenProvider? = null
+
+    @Autowired
     private var problemSupport: SecurityProblemSupport? = null
-) {
 
     @Bean
     @Order(1)
@@ -60,16 +67,23 @@ class OAuthServiceConfig(
     @Throws(Exception::class)
     fun defaultSecurityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
+            .sessionManagement()
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            .and()
             .exceptionHandling()
                 .authenticationEntryPoint(problemSupport)
                 .accessDeniedHandler(problemSupport)
             .and()
+                .cors().and()
                 .csrf().disable()
-                .authorizeHttpRequests()
-                    .requestMatchers("/users/register").permitAll()
-                    .requestMatchers("/").authenticated()
+                .authorizeHttpRequests { configurer ->
+                    configurer
+                        .requestMatchers("/users/register").permitAll()
+                        .requestMatchers("/users/login").permitAll()
+                        .anyRequest().authenticated()
+                }.httpBasic()
             .and()
-                .httpBasic()
+                .apply(securityConfigurerAdapter())
         return http.build()
     }
 
@@ -147,5 +161,9 @@ class OAuthServiceConfig(
     @Bean
     fun passwordEncoder(): PasswordEncoder {
         return BCryptPasswordEncoder()
+    }
+
+    private fun securityConfigurerAdapter(): JWTConfigurer? {
+        return tokenProvider?.let { JWTConfigurer(it) }
     }
 }
